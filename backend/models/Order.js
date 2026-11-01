@@ -102,7 +102,9 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-orderSchema.index({ user: 1 });
-orderSchema.index({ "items.seller": 1 });
+// Compound indexes supporting buyer, seller, and status-based order queries sorted by createdAt
+orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ "items.seller": 1, createdAt: -1 });
+orderSchema.index({ orderStatus: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Order", orderSchema);

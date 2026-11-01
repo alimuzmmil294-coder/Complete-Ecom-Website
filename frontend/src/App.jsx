@@ -44,9 +44,10 @@ const RedirectIfAuthed = ({ children }) => {
 
 function App() {
   return (
-    <>
+    <div className="flex min-h-screen flex-col bg-gray-50 text-gray-900">
       <Navbar />
-      <Routes>
+      <main className="flex flex-1 flex-col">
+        <Routes>
         <Route path="/" element={<RedirectIfAuthed><Home /></RedirectIfAuthed>} />
         <Route path="/login" element={<RedirectIfAuthed><Login /></RedirectIfAuthed>} />
         <Route path="/signup" element={<RedirectIfAuthed><Signup /></RedirectIfAuthed>} />
@@ -61,23 +62,13 @@ function App() {
           }
         />
 
-        {/* Buyer routes */}
-        <Route
-          path="/buyer/products"
-          element={
-            <ProtectedRoute allowedRoles={["BUYER"]}>
-              <ProductCatalog />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/buyer/products/:productId"
-          element={
-            <ProtectedRoute allowedRoles={["BUYER"]}>
-              <ProductDetails />
-            </ProtectedRoute>
-          }
-        />
+        {/* Public Product Catalog routes (Guests + Buyers) */}
+        <Route path="/buyer/products" element={<ProductCatalog />} />
+        <Route path="/products" element={<ProductCatalog />} />
+        <Route path="/buyer/products/:productId" element={<ProductDetails />} />
+        <Route path="/products/:productId" element={<ProductDetails />} />
+
+        {/* Authenticated Buyer routes */}
         <Route
           path="/buyer/cart"
           element={
@@ -189,7 +180,8 @@ function App() {
 
         <Route path="*" element={<NotFound />} />
       </Routes>
-    </>
+      </main>
+    </div>
   );
 }
 

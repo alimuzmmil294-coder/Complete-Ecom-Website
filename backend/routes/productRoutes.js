@@ -11,14 +11,27 @@ const checkRole = require("../middleware/checkRole");
 
 const router = express.Router();
 
+const jwt = require("jsonwebtoken");
+const User = require("../models/User");
+
 // Public catalog browsing — optionalAuth-style: authMiddleware is NOT
-// applied here so buyers can browse without logging in. When a token IS
-// present (seller checking their own listing), we still want req.user set,
-// so we use a lightweight inline check instead of the strict middleware.
+// strictly required so buyers/visitors can browse without logging in. When a valid
+// token IS present (seller checking their own listing), we still set req.user.
+// If the token is expired or invalid, we simply proceed as a guest.
 const optionalAuth = async (req, res, next) => {
-  const authMiddleware = require("../middleware/authMiddleware");
-  if (!req.cookies?.token) return next();
-  return authMiddleware(req, res, next);
+  const token = req.cookies?.token;
+  if (!token) return next();
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
+    if (user && user.isActive) {
+      req.user = { id: user._id.toString(), role: user.role };
+    }
+  } catch (err) {
+    // Expired or invalid token: continue as guest
+  }
+  return next();
 };
 
 router.get("/", optionalAuth, getProducts);

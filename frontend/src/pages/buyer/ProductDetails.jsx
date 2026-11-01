@@ -1,18 +1,23 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import * as productService from "../../services/productService";
-import * as cartService from "../../services/cartService";
-import { Button, Alert, Card, Input } from "../../components/ui.jsx";
+import { useCart } from "../../context/CartContext.jsx";
+import { useAuth } from "../../context/AuthContext.jsx";
+import { Button, Alert, Card, Input, ProductImage } from "../../components/ui.jsx";
 
 const ProductDetails = () => {
   const { productId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth();
+  const { addToCart } = useCart();
 
   const [product, setProduct] = useState(null);
   const [quantity, setQuantity] = useState(1);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -30,18 +35,34 @@ const ProductDetails = () => {
   }, [productId]);
 
   const handleAddToCart = async () => {
+    if (!user) {
+      navigate("/login", { state: { from: location.pathname } });
+      return;
+    }
+    if (user.role !== "BUYER") {
+      setError("Only buyer accounts can purchase products");
+      return;
+    }
     setError("");
     setMessage("");
+    setAdding(true);
     try {
-      await cartService.addToCart(productId, Number(quantity));
+      await addToCart(productId, Number(quantity));
       setMessage("Added to cart");
     } catch (err) {
       setError(err.response?.data?.message || "Could not add to cart");
+    } finally {
+      setAdding(false);
     }
   };
 
   if (loading) return <p className="p-8 text-gray-500">Loading...</p>;
-  if (error && !product) return <div className="p-8"><Alert type="error">{error}</Alert></div>;
+  if (error && !product)
+    return (
+      <div className="p-8">
+        <Alert type="error">{error}</Alert>
+      </div>
+    );
   if (!product) return null;
 
   return (
@@ -50,12 +71,12 @@ const ProductDetails = () => {
         ← Back
       </Button>
       <Card className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <div className="flex h-72 items-center justify-center rounded bg-gray-100 text-gray-400">
-          {product.images?.[0] ? (
-            <img src={product.images[0]} alt={product.name} className="h-72 w-full rounded object-cover" />
-          ) : (
-            "No image"
-          )}
+        <div className="flex h-72 items-center justify-center overflow-hidden rounded bg-gray-100 text-gray-400">
+          <ProductImage
+            src={product.images?.[0]}
+            alt={product.name}
+            className="h-72 w-full rounded object-cover"
+          />
         </div>
         <div>
           <h1 className="text-2xl font-semibold">{product.name}</h1>
@@ -81,8 +102,8 @@ const ProductDetails = () => {
               onChange={(e) => setQuantity(e.target.value)}
               className="w-24"
             />
-            <Button disabled={product.stock === 0} onClick={handleAddToCart}>
-              Add to cart
+            <Button disabled={product.stock === 0 || adding} onClick={handleAddToCart}>
+              {adding ? "Adding..." : "Add to cart"}
             </Button>
           </div>
         </div>

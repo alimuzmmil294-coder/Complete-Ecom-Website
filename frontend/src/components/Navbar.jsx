@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useCart } from "../context/CartContext.jsx";
 
 const roleHome = {
   BUYER: "/buyer/products",
@@ -9,6 +10,7 @@ const roleHome = {
 
 const Navbar = () => {
   const { user, logout } = useAuth();
+  const { cartCount } = useCart();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -26,26 +28,51 @@ const Navbar = () => {
         <div className="flex items-center gap-4 text-sm">
           {user?.role === "BUYER" && (
             <>
-              <Link to="/buyer/products" className="hover:text-brand-600">Shop</Link>
-              <Link to="/buyer/cart" className="hover:text-brand-600">Cart</Link>
-              <Link to="/buyer/orders" className="hover:text-brand-600">Orders</Link>
+              <Link to="/buyer/products" className="hover:text-brand-600">
+                Shop
+              </Link>
+              <Link to="/buyer/cart" className="relative flex items-center hover:text-brand-600">
+                Cart
+                {cartCount > 0 && (
+                  <span className="ml-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-brand-600 px-1.5 text-xs font-semibold text-white">
+                    {cartCount}
+                  </span>
+                )}
+              </Link>
+              <Link to="/buyer/orders" className="hover:text-brand-600">
+                Orders
+              </Link>
             </>
           )}
 
           {user?.role === "SELLER" && (
             <>
-              <Link to="/seller/dashboard" className="hover:text-brand-600">Dashboard</Link>
-              <Link to="/seller/products" className="hover:text-brand-600">My Products</Link>
-              <Link to="/seller/orders" className="hover:text-brand-600">Orders</Link>
+              <Link to="/seller/dashboard" className="hover:text-brand-600">
+                Dashboard
+              </Link>
+              <Link to="/seller/products" className="hover:text-brand-600">
+                My Products
+              </Link>
+              <Link to="/seller/orders" className="hover:text-brand-600">
+                Orders
+              </Link>
             </>
           )}
 
           {user?.role === "ADMIN" && (
             <>
-              <Link to="/admin/dashboard" className="hover:text-brand-600">Dashboard</Link>
-              <Link to="/admin/users" className="hover:text-brand-600">Users</Link>
-              <Link to="/admin/products" className="hover:text-brand-600">Products</Link>
-              <Link to="/admin/orders" className="hover:text-brand-600">Orders</Link>
+              <Link to="/admin/dashboard" className="hover:text-brand-600">
+                Dashboard
+              </Link>
+              <Link to="/admin/users" className="hover:text-brand-600">
+                Users
+              </Link>
+              <Link to="/admin/products" className="hover:text-brand-600">
+                Products
+              </Link>
+              <Link to="/admin/orders" className="hover:text-brand-600">
+                Orders
+              </Link>
             </>
           )}
 
@@ -65,7 +92,12 @@ const Navbar = () => {
 
           {!user && (
             <>
-              <Link to="/login" className="hover:text-brand-600">Login</Link>
+              <Link to="/buyer/products" className="font-medium hover:text-brand-600">
+                Browse Products
+              </Link>
+              <Link to="/login" className="hover:text-brand-600">
+                Login
+              </Link>
               <Link
                 to="/signup"
                 className="rounded bg-brand-600 px-3 py-1.5 text-white hover:bg-brand-700"

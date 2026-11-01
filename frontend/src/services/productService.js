@@ -1,7 +1,7 @@
 import api from "./api";
 
-export const getProducts = (params = {}) =>
-  api.get("/products", { params }).then((res) => res.data);
+export const getProducts = (params = {}, signal) =>
+  api.get("/products", { params, signal }).then((res) => res.data);
 
 export const getProductById = (productId) =>
   api.get(`/products/${productId}`).then((res) => res.data);

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import * as productService from "../../services/productService";
-import { Button, Alert, Card, Badge } from "../../components/ui.jsx";
+import { Button, Alert, Card, Badge, ProductImage } from "../../components/ui.jsx";
 
 const MyProducts = () => {
   const [products, setProducts] = useState([]);
@@ -54,13 +54,22 @@ const MyProducts = () => {
         <div className="space-y-3">
           {products.map((p) => (
             <Card key={p._id} className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">
-                  {p.name} {!p.isActive && <Badge tone="red">Deleted</Badge>}
-                </p>
-                <p className="text-sm text-gray-500">
-                  ${p.price.toFixed(2)} · {p.stock} in stock · {p.category}
-                </p>
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded bg-gray-100">
+                  <ProductImage
+                    src={p.images?.[0]}
+                    alt={p.name}
+                    className="h-12 w-12 rounded object-cover"
+                  />
+                </div>
+                <div>
+                  <p className="font-medium">
+                    {p.name} {!p.isActive && <Badge tone="red">Deleted</Badge>}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    ${p.price.toFixed(2)} · {p.stock} in stock · {p.category}
+                  </p>
+                </div>
               </div>
               <div className="flex gap-2">
                 <Link to={`/seller/products/${p._id}/edit`}>

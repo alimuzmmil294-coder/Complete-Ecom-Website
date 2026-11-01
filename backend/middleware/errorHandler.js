@@ -32,8 +32,11 @@ const errorHandler = (err, req, res, next) => {
     message = `Invalid ${err.path}`;
   }
 
-  if (process.env.NODE_ENV !== "production") {
-    console.error(err);
+  if (statusCode >= 500 || process.env.NODE_ENV !== "production") {
+    console.error(
+      `[${new Date().toISOString()}] ${req.method} ${req.originalUrl} ->`,
+      err,
+    );
   }
 
   res.status(statusCode).json({

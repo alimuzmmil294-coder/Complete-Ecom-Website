@@ -7,12 +7,17 @@ const asyncHandler = require("../utils/asyncHandler");
 const validateObjectId = require("../utils/validateObjectId");
 
 /**
+ * Standard rounding helper to eliminate IEEE 754 floating-point drift in monetary calculations.
+ */
+const roundCurrency = (val) => Math.round((Number(val) + Number.EPSILON) * 100) / 100;
+
+/**
  * POST /api/v1/orders
  * BUYER only. Converts the authenticated buyer's cart into an order.
  *
  * Runs inside a MongoDB transaction so that, under concurrent purchases of
  * the same product, either the whole checkout succeeds (order created,
- * stock deducted, cart cleared) or none of it happens. Stock is the
+ * stock deducted via bulkWrite, cart cleared) or none of it happens. Stock is the
  * authoritative check here — the cart-add check earlier is best-effort only.
  *
  * Requires a MongoDB deployment that supports transactions
@@ -57,7 +62,7 @@ const createOrder = asyncHandler(async (req, res) => {
         const product = productMap.get(cartItem.product.toString());
 
         if (!product || !product.isActive) {
-          throw new ApiError(404, `A product in your cart is no longer available`);
+          throw new ApiError(404, "A product in your cart is no longer available");
         }
 
         if (product.stock < cartItem.quantity) {
@@ -67,8 +72,8 @@ const createOrder = asyncHandler(async (req, res) => {
           );
         }
 
-        const subtotal = product.price * cartItem.quantity;
-        totalAmount += subtotal;
+        const subtotal = roundCurrency(product.price * cartItem.quantity);
+        totalAmount = roundCurrency(totalAmount + subtotal);
 
         orderItems.push({
           product: product._id,
@@ -81,19 +86,22 @@ const createOrder = asyncHandler(async (req, res) => {
         });
       }
 
-      // Atomic, conditional stock deduction: the filter re-checks stock >=
-      // quantity at write time, so a concurrent checkout that already
-      // consumed the stock will cause this update to match zero documents.
-      for (const item of orderItems) {
-        const updateResult = await Product.updateOne(
-          { _id: item.product, stock: { $gte: item.quantity } },
-          { $inc: { stock: -item.quantity } },
-          { session }
-        );
+      // Atomic, batch stock deduction via bulkWrite inside the active transaction.
+      // Replaces sequential update loops to reduce round-trips while holding transaction locks.
+      const bulkOps = orderItems.map((item) => ({
+        updateOne: {
+          filter: { _id: item.product, stock: { $gte: item.quantity } },
+          update: { $inc: { stock: -item.quantity } },
+        },
+      }));
 
-        if (updateResult.modifiedCount === 0) {
-          throw new ApiError(409, `"${item.name}" went out of stock. Please update your cart.`);
-        }
+      const bulkResult = await Product.bulkWrite(bulkOps, { session });
+
+      if (bulkResult.modifiedCount !== orderItems.length) {
+        throw new ApiError(
+          409,
+          "One or more items in your cart went out of stock. Please update your cart."
+        );
       }
 
       const [order] = await Order.create(
@@ -251,8 +259,8 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
  * BUYER only, and only their own order, and only while cancellation still
  * makes sense (not already shipped/delivered/cancelled).
  *
- * Restores stock for every item in the order inside a transaction, since
- * cancelling must be as atomic as placing the order.
+ * Performs an atomic transition on orderStatus inside a transaction to prevent
+ * double-cancellation race conditions, then restores stock via bulkWrite.
  */
 const cancelOrder = asyncHandler(async (req, res) => {
   const { orderId } = req.params;
@@ -263,35 +271,57 @@ const cancelOrder = asyncHandler(async (req, res) => {
 
   try {
     await session.withTransaction(async () => {
-      const order = await Order.findById(orderId).session(session);
+      // 1. Atomic state transition: guarantees only ONE concurrent execution can succeed
+      const order = await Order.findOneAndUpdate(
+        {
+          _id: orderId,
+          user: req.user.id,
+          orderStatus: { $nin: ["SHIPPED", "DELIVERED", "CANCELLED"] },
+        },
+        {
+          $set: {
+            orderStatus: "CANCELLED",
+            "items.$[].itemStatus": "CANCELLED",
+          },
+        },
+        { session, new: true }
+      );
 
       if (!order) {
-        throw new ApiError(404, "Order not found");
+        // Inspect order state to provide precise, granular HTTP error status
+        const existingOrder = await Order.findById(orderId).session(session);
+
+        if (!existingOrder) {
+          throw new ApiError(404, "Order not found");
+        }
+
+        if (existingOrder.user.toString() !== req.user.id) {
+          throw new ApiError(403, "You can only cancel your own orders");
+        }
+
+        const nonCancellable = ["SHIPPED", "DELIVERED", "CANCELLED"];
+        if (nonCancellable.includes(existingOrder.orderStatus)) {
+          throw new ApiError(
+            400,
+            `Order cannot be cancelled once it is ${existingOrder.orderStatus}`
+          );
+        }
+
+        throw new ApiError(400, "Order cannot be cancelled");
       }
 
-      if (order.user.toString() !== req.user.id) {
-        throw new ApiError(403, "You can only cancel your own orders");
+      // 2. Atomic bulk restock inside the active session
+      const restoreOps = order.items.map((item) => ({
+        updateOne: {
+          filter: { _id: item.product },
+          update: { $inc: { stock: item.quantity } },
+        },
+      }));
+
+      if (restoreOps.length > 0) {
+        await Product.bulkWrite(restoreOps, { session });
       }
 
-      const nonCancellable = ["SHIPPED", "DELIVERED", "CANCELLED"];
-      if (nonCancellable.includes(order.orderStatus)) {
-        throw new ApiError(400, `Order cannot be cancelled once it is ${order.orderStatus}`);
-      }
-
-      for (const item of order.items) {
-        await Product.updateOne(
-          { _id: item.product },
-          { $inc: { stock: item.quantity } },
-          { session }
-        );
-      }
-
-      order.orderStatus = "CANCELLED";
-      order.items.forEach((item) => {
-        item.itemStatus = "CANCELLED";
-      });
-
-      await order.save({ session });
       updatedOrder = order;
     });
   } finally {
@@ -303,14 +333,33 @@ const cancelOrder = asyncHandler(async (req, res) => {
 
 /**
  * Returns a plain-object copy of the order with only the requesting
- * seller's items included, so a seller response never leaks another
- * seller's items, prices, or quantities.
+ * seller's items included, recalculates totalAmount for that seller's items only,
+ * and redacts customer contact details if the order has been cancelled.
  */
 const scopeOrderToSeller = (order, sellerId) => {
-  const plain = order.toObject ? order.toObject() : order;
+  const plain = order.toObject ? order.toObject() : { ...order };
+  const sellerItems = (plain.items || []).filter(
+    (item) => item.seller && item.seller.toString() === sellerId
+  );
+  const sellerSubtotal = roundCurrency(
+    sellerItems.reduce((acc, item) => acc + (Number(item.subtotal) || 0), 0)
+  );
+
+  let shippingAddress = plain.shippingAddress;
+  if (plain.orderStatus === "CANCELLED" && shippingAddress) {
+    shippingAddress = {
+      ...shippingAddress,
+      phone: "[REDACTED - ORDER CANCELLED]",
+      addressLine1: "[REDACTED - ORDER CANCELLED]",
+      addressLine2: "",
+    };
+  }
+
   return {
     ...plain,
-    items: plain.items.filter((item) => item.seller.toString() === sellerId),
+    items: sellerItems,
+    totalAmount: sellerSubtotal,
+    shippingAddress,
   };
 };
 

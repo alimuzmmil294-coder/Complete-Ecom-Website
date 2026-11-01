@@ -44,7 +44,12 @@ const productSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-productSchema.index({ seller: 1 });
+// Indexes supporting catalog queries, filtering, sorting, and text search
 productSchema.index({ category: 1 });
+productSchema.index({ isActive: 1, category: 1, createdAt: -1 });
+productSchema.index({ isActive: 1, price: 1 });
+productSchema.index({ isActive: 1, price: -1 });
+productSchema.index({ seller: 1, createdAt: -1 });
+productSchema.index({ name: "text", description: "text" });
 
 module.exports = mongoose.model("Product", productSchema);

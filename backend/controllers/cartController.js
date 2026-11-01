@@ -6,6 +6,11 @@ const asyncHandler = require("../utils/asyncHandler");
 const validateObjectId = require("../utils/validateObjectId");
 
 /**
+ * Standard rounding helper to eliminate IEEE 754 floating-point drift in monetary calculations.
+ */
+const roundCurrency = (val) => Math.round((Number(val) + Number.EPSILON) * 100) / 100;
+
+/**
  * GET /api/v1/cart
  * Uses an aggregation with $lookup to join product details and compute
  * per-item and cart-level totals in a single query.
@@ -40,7 +45,12 @@ const getCart = asyncHandler(async (req, res) => {
                 price: "$productDetails.price",
                 stock: "$productDetails.stock",
                 quantity: "$items.quantity",
-                subtotal: { $multiply: ["$productDetails.price", "$items.quantity"] },
+                subtotal: {
+                  $round: [
+                    { $multiply: ["$productDetails.price", "$items.quantity"] },
+                    2,
+                  ],
+                },
               },
               "$$REMOVE",
             ],
@@ -50,7 +60,9 @@ const getCart = asyncHandler(async (req, res) => {
     },
     {
       $addFields: {
-        cartTotal: { $sum: "$items.subtotal" },
+        cartTotal: {
+          $round: [{ $sum: "$items.subtotal" }, 2],
+        },
       },
     },
   ]);
@@ -64,7 +76,19 @@ const getCart = asyncHandler(async (req, res) => {
 
   const { _id, user, ...cart } = result[0];
 
-  res.status(200).json({ success: true, data: cart });
+  const formattedItems = (cart.items || []).map((item) => ({
+    ...item,
+    subtotal: roundCurrency(item.subtotal),
+  }));
+
+  res.status(200).json({
+    success: true,
+    data: {
+      ...cart,
+      items: formattedItems,
+      cartTotal: roundCurrency(cart.cartTotal),
+    },
+  });
 });
 
 /**
@@ -129,6 +153,51 @@ const removeCartItem = asyncHandler(async (req, res) => {
 });
 
 /**
+ * PUT /api/v1/cart/item/:productId
+ */
+const updateCartItemQuantity = asyncHandler(async (req, res) => {
+  const { productId } = req.params;
+  const { quantity } = req.body;
+
+  validateObjectId(productId, "productId");
+
+  const parsedQuantity = Number(quantity);
+  if (!Number.isInteger(parsedQuantity) || parsedQuantity < 0) {
+    throw new ApiError(400, "Quantity must be a non-negative integer");
+  }
+
+  const cart = await Cart.findOne({ user: req.user.id });
+  if (!cart) {
+    throw new ApiError(404, "Cart not found");
+  }
+
+  if (parsedQuantity === 0) {
+    cart.items = cart.items.filter((item) => item.product.toString() !== productId);
+    await cart.save();
+    return res.status(200).json({ success: true, message: "Item removed from cart" });
+  }
+
+  const product = await Product.findById(productId);
+  if (!product || !product.isActive) {
+    throw new ApiError(404, "Product not found or unavailable");
+  }
+
+  if (parsedQuantity > product.stock) {
+    throw new ApiError(409, `Only ${product.stock} unit(s) of "${product.name}" available`);
+  }
+
+  const item = cart.items.find((i) => i.product.toString() === productId);
+  if (!item) {
+    throw new ApiError(404, "Item not found in cart");
+  }
+
+  item.quantity = parsedQuantity;
+  await cart.save();
+
+  res.status(200).json({ success: true, message: "Cart updated" });
+});
+
+/**
  * DELETE /api/v1/cart/clear
  */
 const clearCart = asyncHandler(async (req, res) => {
@@ -141,4 +210,4 @@ const clearCart = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, message: "Cart cleared" });
 });
 
-module.exports = { getCart, addToCart, removeCartItem, clearCart };
+module.exports = { getCart, addToCart, updateCartItemQuantity, removeCartItem, clearCart };

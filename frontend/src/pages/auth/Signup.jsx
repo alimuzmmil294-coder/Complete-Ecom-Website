@@ -39,7 +39,7 @@ const Signup = () => {
   };
 
   return (
-    <div className="flex min-h-[calc(100vh-57px)] items-center justify-center px-4 py-8">
+    <div className="flex flex-1 items-center justify-center px-4 py-8">
       <Card className="w-full max-w-sm">
         <h1 className="mb-4 text-xl font-semibold">Create an account</h1>
         <Alert type="error">{error}</Alert>
